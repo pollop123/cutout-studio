@@ -43,6 +43,7 @@
       </div>
       <div class="toolbar">
         <button class="primary" id="auto-remove" type="button" disabled>自動去背</button>
+        <button id="cleanup-mask" type="button" disabled>自動清理遮罩</button>
         <button id="eraser-toggle" type="button" disabled>橡皮擦：關</button>
         <label>筆刷 <input id="brush-size" type="range" min="6" max="120" value="36"></label>
         <button id="undo" type="button" disabled>復原上一步</button>
@@ -74,6 +75,17 @@
           <option value="top2">保留前 2 個主體</option>
           <option value="center">保留最靠中心主體</option>
         </select>
+      </label>
+      <label class="select-field">遮罩清理
+        <select id="cleanup-preset">
+          <option value="photo">照片自然</option>
+          <option value="drawing">手繪乾淨</option>
+          <option value="cartoon">卡通截圖</option>
+          <option value="off">不清理</option>
+        </select>
+      </label>
+      <label class="range-field">清理強度 <output id="cleanup-value">50%</output>
+        <input id="cleanup-strength" type="range" min="0" max="100" value="50">
       </label>
       <p class="subject-stats" id="subject-stats">尚未分析主體</p>
       <button id="center-subject" type="button" disabled>主體自動置中</button>

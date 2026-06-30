@@ -69,7 +69,7 @@ async function selectAsset(id) {
 }
 
 function setControls(enabled) {
-  ['#auto-remove', '#eraser-toggle', '#restore', '#center-subject', '#download'].forEach((selector) => {
+  ['#auto-remove', '#cleanup-mask', '#eraser-toggle', '#restore', '#center-subject', '#download'].forEach((selector) => {
     $(selector).disabled = !enabled || (selector === '#auto-remove' && !state.modelReady);
   });
 }
@@ -140,14 +140,141 @@ async function autoRemove() {
     asset.processed = data.image;
     state.history = [];
     await setCanvasImage(asset.processed);
+    if ($('#cleanup-preset').value !== 'off') applyMaskCleanup(true, false);
     renderAssets();
-    toast('自動去背完成');
+    toast($('#cleanup-preset').value === 'off' ? '自動去背完成' : '自動去背與遮罩清理完成');
   } catch (error) {
     toast(error.message);
   } finally {
     button.textContent = '自動去背';
     button.disabled = !state.modelReady;
   }
+}
+
+function cleanupSettings() {
+  const preset = $('#cleanup-preset').value;
+  const strength = Number($('#cleanup-strength').value) / 100;
+  const presets = {
+    off: { alpha: 10, shrink: 0, feather: 0, minArea: 0 },
+    photo: { alpha: 22, shrink: 1, feather: 1, minArea: 0.00025 },
+    drawing: { alpha: 36, shrink: 1, feather: 0.7, minArea: 0.00018 },
+    cartoon: { alpha: 62, shrink: 2, feather: 0.5, minArea: 0.00045 },
+  };
+  const base = presets[preset] || presets.photo;
+  return {
+    preset,
+    alpha: preset === 'off' ? 10 : Math.round(10 + (base.alpha - 10) * (0.45 + strength * 1.1)),
+    shrink: preset === 'off' ? 0 : Math.round(base.shrink * (0.5 + strength)),
+    feather: preset === 'off' ? 0 : base.feather * (0.45 + strength * 0.9),
+    minArea: preset === 'off' ? 0 : base.minArea * (0.45 + strength * 1.1),
+  };
+}
+
+function alphaMaskFromCanvas(sourceCanvas, alphaThreshold) {
+  const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = sourceCanvas;
+  const imageData = sourceCtx.getImageData(0, 0, width, height);
+  const mask = new Uint8Array(width * height);
+  for (let i = 0; i < mask.length; i += 1) {
+    mask[i] = imageData.data[i * 4 + 3] > alphaThreshold ? 1 : 0;
+  }
+  return { imageData, mask, width, height };
+}
+
+function keepLargeMaskComponents(mask, width, height, minAreaRatio) {
+  if (minAreaRatio <= 0) return mask;
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const output = new Uint8Array(total);
+  const minArea = Math.max(12, Math.round(total * minAreaRatio));
+  const stack = [];
+
+  for (let start = 0; start < total; start += 1) {
+    if (visited[start] || !mask[start]) continue;
+    const pixels = [];
+    visited[start] = 1;
+    stack.push(start);
+    while (stack.length) {
+      const index = stack.pop();
+      pixels.push(index);
+      const x = index % width;
+      const neighbors = [index - 1, index + 1, index - width, index + width];
+      for (const next of neighbors) {
+        if (next < 0 || next >= total || visited[next] || !mask[next]) continue;
+        if ((next === index - 1 && x === 0) || (next === index + 1 && x === width - 1)) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+    if (pixels.length >= minArea) pixels.forEach((index) => { output[index] = 1; });
+  }
+  return output;
+}
+
+function erodeMask(mask, width, height, iterations) {
+  let current = mask;
+  for (let round = 0; round < iterations; round += 1) {
+    const next = new Uint8Array(current.length);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (!current[index]) continue;
+        if (current[index - 1] && current[index + 1] && current[index - width] && current[index + width]) {
+          next[index] = 1;
+        }
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function featheredAlpha(mask, width, height, amount) {
+  if (amount <= 0) return mask;
+  const output = new Uint8Array(mask.length);
+  const radius = Math.max(1, Math.round(amount));
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (!mask[index]) continue;
+      let edge = false;
+      for (let dy = -radius; dy <= radius && !edge; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height || !mask[ny * width + nx]) {
+            edge = true;
+            break;
+          }
+        }
+      }
+      output[index] = edge ? Math.round(255 * Math.max(0.35, 1 - amount * 0.28)) : 255;
+    }
+  }
+  return output;
+}
+
+function applyMaskCleanup(remember = true, notify = true) {
+  if (!activeAsset()) return;
+  const settings = cleanupSettings();
+  if (settings.preset === 'off') {
+    toast('遮罩清理已關閉');
+    return;
+  }
+  const { imageData, mask, width, height } = alphaMaskFromCanvas(canvas, settings.alpha);
+  let cleaned = keepLargeMaskComponents(mask, width, height, settings.minArea);
+  cleaned = erodeMask(cleaned, width, height, settings.shrink);
+  const alpha = featheredAlpha(cleaned, width, height, settings.feather);
+  let kept = 0;
+  for (let i = 0; i < alpha.length; i += 1) {
+    imageData.data[i * 4 + 3] = alpha[i];
+    if (alpha[i] > 10) kept += 1;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  if (remember) pushHistory();
+  syncProcessed();
+  updatePreview();
+  if (notify) toast(`遮罩已清理，保留 ${kept.toLocaleString()} 個前景像素`);
 }
 
 function pointerPosition(event) {
@@ -301,6 +428,7 @@ const dropzone = $('#dropzone');
 dropzone.addEventListener('drop', (event) => importFiles(event.dataTransfer.files));
 $('#clear-all').addEventListener('click', () => { state.assets = []; state.activeId = null; state.history = []; ctx.clearRect(0, 0, canvas.width, canvas.height); $('#canvas-empty').hidden = false; renderAssets(); updatePreview(); });
 $('#auto-remove').addEventListener('click', autoRemove);
+$('#cleanup-mask').addEventListener('click', () => applyMaskCleanup());
 $('#eraser-toggle').addEventListener('click', () => { state.erasing = !state.erasing; $('#eraser-toggle').textContent = `橡皮擦：${state.erasing ? '開' : '關'}`; $('#eraser-toggle').classList.toggle('primary', state.erasing); });
 canvas.addEventListener('pointerdown', (event) => { if (!state.erasing) return; state.drawing = true; canvas.setPointerCapture(event.pointerId); erase(event); });
 canvas.addEventListener('pointermove', erase);
@@ -309,6 +437,9 @@ $('#undo').addEventListener('click', async () => { if (state.history.length < 2)
 $('#restore').addEventListener('click', async () => { const asset = activeAsset(); if (!asset) return; asset.processed = null; state.history = []; await setCanvasImage(asset.original); renderAssets(); toast('已回到原圖'); });
 $('#presets').addEventListener('click', (event) => { const button = event.target.closest('button[data-w]'); if (!button) return; $('#output-width').value = button.dataset.w; $('#output-height').value = button.dataset.h; updatePreview(); });
 ['#output-width', '#output-height', '#padding', '#subject-mode'].forEach((selector) => $(selector).addEventListener('input', updatePreview));
+['#cleanup-preset', '#cleanup-strength'].forEach((selector) => $(selector).addEventListener('input', () => {
+  $('#cleanup-value').textContent = `${$('#cleanup-strength').value}%`;
+}));
 $('#center-subject').addEventListener('click', () => { updatePreview(); toast('已依透明邊界置中主體'); });
 $('#download').addEventListener('click', () => { const asset = activeAsset(); if (!asset) return; updatePreview(); const link = document.createElement('a'); const stem = asset.name.replace(/\.[^.]+$/, ''); link.download = `${stem}-cutout-${preview.width}x${preview.height}.png`; link.href = preview.toDataURL('image/png'); link.click(); });
 

@@ -2,6 +2,8 @@
 
 本機優先的創作者去背與尺寸整理工具。原圖不會被覆寫，匯出時另存透明 PNG。
 
+目標是讓手繪圖、截圖與個人照片能先自動完成去背、遮罩清理、主體置中與尺寸輸出；橡皮擦保留給少數自動處理不了的邊角修補。
+
 ## 啟動
 
 ```bash
@@ -33,18 +35,31 @@ venv/bin/python server.py serve --port 4173
 
 這是 alpha 區塊分析，不是臉部辨識；若兩個人身體相連，會被視為同一個主體。
 
+## 遮罩清理
+
+自動去背後會套用遮罩清理，也可以調整參數後手動重跑，減少殘邊、光暈與小雜點：
+
+- `照片自然`：保守清理，適合真人照片。
+- `手繪乾淨`：移除掃描或截圖的小雜點，盡量保留線條。
+- `卡通截圖`：較積極移除半透明光暈與背景殘留。
+- `不清理`：保留原始去背結果。
+
+清理強度會同時影響 alpha threshold、遮罩內縮、柔邊與小元件移除。強度太高可能吃掉細髮、手指、細線；這時降低強度後再用橡皮擦修局部。
+
 ## 批次自動化
 
 可以直接處理整個資料夾，輸出 LINE 常用尺寸：
 
 ```bash
-venv/bin/python server.py batch ./photos --output ./outputs --subject-mode top2 --zip cutouts.zip
+venv/bin/python server.py batch ./photos --output ./outputs --subject-mode top2 --cleanup-preset photo --zip cutouts.zip
 ```
 
 常用參數：
 
 ```bash
 --subject-mode all|largest|top2|center
+--cleanup-preset off|photo|drawing|cartoon
+--cleanup-strength 50
 --padding 12
 --preset line-icons
 --size 240x240
@@ -60,6 +75,7 @@ venv/bin/python server.py batch ./photos --output ./outputs --subject-mode top2 
 - 手動橡皮擦與復原
 - 依 Alpha 邊界自動置中
 - 多主體區塊策略
+- 自動遮罩清理：去雜點、alpha threshold、內縮與柔邊
 - 資料夾批次輸出與 ZIP 打包
 - LINE 常用尺寸與自訂尺寸
 - 安全留白與透明 PNG 下載

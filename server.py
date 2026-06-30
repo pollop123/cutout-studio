@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PIL import Image
+from PIL import Image, ImageFilter, UnidentifiedImageError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +24,12 @@ _session = None
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 PRESETS = {
     "line-icons": [(120, 120), (116, 116), (240, 240), (247, 247), (128, 150), (80, 56)],
+}
+CLEANUP_PRESETS = {
+    "off": {"alpha": 10, "shrink": 0, "feather": 0.0, "min_area": 0.0},
+    "photo": {"alpha": 22, "shrink": 1, "feather": 1.0, "min_area": 0.00025},
+    "drawing": {"alpha": 36, "shrink": 1, "feather": 0.7, "min_area": 0.00018},
+    "cartoon": {"alpha": 62, "shrink": 2, "feather": 0.5, "min_area": 0.00045},
 }
 
 
@@ -141,6 +147,52 @@ def select_subject_bounds(image: Image.Image, mode: str) -> tuple[int, int, int,
     return min_x, min_y, max_x, max_y
 
 
+def cleanup_values(preset: str, strength: int) -> dict:
+    base = CLEANUP_PRESETS[preset]
+    if preset == "off":
+        return base
+    factor = 0.45 + max(0, min(100, strength)) / 100 * 1.1
+    return {
+        "alpha": round(10 + (base["alpha"] - 10) * factor),
+        "shrink": round(base["shrink"] * (0.5 + max(0, min(100, strength)) / 100)),
+        "feather": base["feather"] * (0.45 + max(0, min(100, strength)) / 100 * 0.9),
+        "min_area": base["min_area"] * factor,
+    }
+
+
+def clean_mask(image: Image.Image, preset: str, strength: int) -> Image.Image:
+    image = image.convert("RGBA")
+    if preset == "off":
+        return image
+    settings = cleanup_values(preset, strength)
+    alpha = image.getchannel("A").point(lambda value: 255 if value > settings["alpha"] else 0)
+    mask_image = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    mask_image.putalpha(alpha)
+    components = alpha_components(mask_image, alpha_threshold=10)
+    min_area = max(12, round(image.width * image.height * settings["min_area"]))
+    kept_alpha = Image.new("L", image.size, 0)
+    for component in components:
+        if component["area"] < min_area:
+            continue
+        component_mask = alpha.crop((
+            component["x"],
+            component["y"],
+            component["x"] + component["width"],
+            component["y"] + component["height"],
+        ))
+        kept_alpha.paste(component_mask, (component["x"], component["y"]))
+
+    for _ in range(settings["shrink"]):
+        kept_alpha = kept_alpha.filter(ImageFilter.MinFilter(3))
+    if settings["feather"] > 0:
+        kept_alpha = kept_alpha.filter(ImageFilter.GaussianBlur(radius=settings["feather"]))
+        kept_alpha = kept_alpha.point(lambda value: min(255, round(value * 1.15)))
+
+    output = image.copy()
+    output.putalpha(kept_alpha)
+    return output
+
+
 def render_cutout(image: Image.Image, size: tuple[int, int], padding_percent: int, subject_mode: str) -> Image.Image:
     image = image.convert("RGBA")
     bounds = select_subject_bounds(image, subject_mode) or (0, 0, image.width, image.height)
@@ -176,22 +228,27 @@ def run_batch(args: argparse.Namespace) -> None:
 
     exported = []
     for image_path in images:
-        with Image.open(image_path) as image:
-            image = image.convert("RGBA")
-            if image.width * image.height > 25_000_000:
-                print(f"skip {image_path.name}: larger than 25 megapixels")
-                continue
-            if not args.skip_remove:
-                source = io.BytesIO()
-                image.save(source, "PNG")
-                image = Image.open(io.BytesIO(remove_background(source.getvalue()))).convert("RGBA")
-            for size in sizes:
-                result = render_cutout(image, size, args.padding, args.subject_mode)
-                output_name = f"{slugify_stem(image_path)}-{size[0]}x{size[1]}.png"
-                output_path = output_dir / output_name
-                result.save(output_path, "PNG", optimize=True)
-                exported.append(output_path)
-                print(f"wrote {output_path}")
+        try:
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGBA")
+        except UnidentifiedImageError:
+            print(f"skip {image_path.name}: unreadable image file")
+            continue
+        if image.width * image.height > 25_000_000:
+            print(f"skip {image_path.name}: larger than 25 megapixels")
+            continue
+        if not args.skip_remove:
+            source = io.BytesIO()
+            image.save(source, "PNG")
+            image = Image.open(io.BytesIO(remove_background(source.getvalue()))).convert("RGBA")
+        image = clean_mask(image, args.cleanup_preset, args.cleanup_strength)
+        for size in sizes:
+            result = render_cutout(image, size, args.padding, args.subject_mode)
+            output_name = f"{slugify_stem(image_path)}-{size[0]}x{size[1]}.png"
+            output_path = output_dir / output_name
+            result.save(output_path, "PNG", optimize=True)
+            exported.append(output_path)
+            print(f"wrote {output_path}")
 
     if args.zip:
         zip_path = args.zip.resolve()
@@ -273,6 +330,8 @@ def main() -> None:
     batch_parser.add_argument("--size", type=parse_size, action="append", help="custom output size, for example 240x240")
     batch_parser.add_argument("--padding", type=int, default=12)
     batch_parser.add_argument("--subject-mode", choices=["all", "largest", "top2", "center"], default="all")
+    batch_parser.add_argument("--cleanup-preset", choices=sorted(CLEANUP_PRESETS), default="photo")
+    batch_parser.add_argument("--cleanup-strength", type=int, default=50)
     batch_parser.add_argument("--skip-remove", action="store_true", help="skip AI background removal and use existing alpha")
     batch_parser.add_argument("--zip", type=Path, help="write a ZIP containing all exported PNG files")
     parser.add_argument("--port", type=int, default=4173, help=argparse.SUPPRESS)
