@@ -68,10 +68,11 @@ button.ghost { background: transparent; padding: 7px 9px; color: var(--muted); }
 .presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 18px; }
 .presets button { padding: 8px; font-size: 12px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.field-row label, .range-field { display: grid; gap: 7px; margin-bottom: 16px; color: var(--muted); font-size: 12px; }
-input[type="number"] { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: #111310; color: var(--text); padding: 10px; }
+.field-row label, .range-field, .select-field { display: grid; gap: 7px; margin-bottom: 16px; color: var(--muted); font-size: 12px; }
+input[type="number"], select { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: #111310; color: var(--text); padding: 10px; }
 .range-field output { justify-self: end; margin-top: -21px; color: var(--text); }
 .range-field input { width: 100%; accent-color: var(--accent); }
+.subject-stats { margin: -6px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 #center-subject, .download { width: 100%; }
 .preview-card { display: grid; place-items: center; margin: 18px 0; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background-color: #dadbd5; background-image: linear-gradient(45deg,#c6c8c1 25%,transparent 25%),linear-gradient(-45deg,#c6c8c1 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#c6c8c1 75%),linear-gradient(-45deg,transparent 75%,#c6c8c1 75%); background-position: 0 0,0 8px,8px -8px,-8px 0; background-size: 16px 16px; }
 #export-preview { max-width: 100%; max-height: 250px; object-fit: contain; }

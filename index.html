@@ -67,6 +67,15 @@
       <label class="range-field">安全留白 <output id="padding-value">12%</output>
         <input id="padding" type="range" min="0" max="35" value="12">
       </label>
+      <label class="select-field">主體策略
+        <select id="subject-mode">
+          <option value="all">全部保留</option>
+          <option value="largest">只保留最大主體</option>
+          <option value="top2">保留前 2 個主體</option>
+          <option value="center">保留最靠中心主體</option>
+        </select>
+      </label>
+      <p class="subject-stats" id="subject-stats">尚未分析主體</p>
       <button id="center-subject" type="button" disabled>主體自動置中</button>
       <div class="preview-card">
         <canvas id="export-preview" width="240" height="240"></canvas>

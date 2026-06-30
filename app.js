@@ -186,6 +186,84 @@ function alphaBounds(sourceCanvas) {
   return maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+function subjectComponents(sourceCanvas) {
+  const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = sourceCanvas;
+  const data = sourceCtx.getImageData(0, 0, width, height).data;
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const components = [];
+  const minArea = Math.max(20, Math.round(total * 0.00035));
+  const stack = [];
+
+  for (let start = 0; start < total; start += 1) {
+    if (visited[start] || data[start * 4 + 3] <= 10) continue;
+    let minX = width, minY = height, maxX = -1, maxY = -1, area = 0;
+    let sumX = 0, sumY = 0;
+    visited[start] = 1;
+    stack.push(start);
+    while (stack.length) {
+      const index = stack.pop();
+      const x = index % width;
+      const y = Math.floor(index / width);
+      area += 1;
+      sumX += x;
+      sumY += y;
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+      const neighbors = [index - 1, index + 1, index - width, index + width];
+      for (const next of neighbors) {
+        if (next < 0 || next >= total || visited[next]) continue;
+        if ((next === index - 1 && x === 0) || (next === index + 1 && x === width - 1)) continue;
+        if (data[next * 4 + 3] <= 10) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+    if (area >= minArea) {
+      components.push({
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+        area,
+        cx: sumX / area,
+        cy: sumY / area,
+      });
+    }
+  }
+  return components.sort((a, b) => b.area - a.area);
+}
+
+function selectedSubjectBounds(sourceCanvas) {
+  const components = subjectComponents(sourceCanvas);
+  if (!components.length) return { bounds: alphaBounds(sourceCanvas), count: 0, kept: 0 };
+  const mode = $('#subject-mode').value;
+  let selected = components;
+  if (mode === 'largest') {
+    selected = components.slice(0, 1);
+  } else if (mode === 'top2') {
+    selected = components.slice(0, 2);
+  } else if (mode === 'center') {
+    const centerX = sourceCanvas.width / 2;
+    const centerY = sourceCanvas.height / 2;
+    selected = [components.reduce((best, component) => {
+      const bestScore = Math.hypot(best.cx - centerX, best.cy - centerY);
+      const score = Math.hypot(component.cx - centerX, component.cy - centerY);
+      return score < bestScore ? component : best;
+    })];
+  }
+  const minX = Math.min(...selected.map((item) => item.x));
+  const minY = Math.min(...selected.map((item) => item.y));
+  const maxX = Math.max(...selected.map((item) => item.x + item.width - 1));
+  const maxY = Math.max(...selected.map((item) => item.y + item.height - 1));
+  return {
+    bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 },
+    count: components.length,
+    kept: selected.length,
+  };
+}
+
 function updatePreview() {
   if (!activeAsset()) return;
   const width = Math.max(16, Math.min(4096, Number($('#output-width').value) || 240));
@@ -194,7 +272,8 @@ function updatePreview() {
   preview.width = width;
   preview.height = height;
   previewCtx.clearRect(0, 0, width, height);
-  const bounds = alphaBounds(canvas) || { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  const analysis = selectedSubjectBounds(canvas);
+  const bounds = analysis.bounds || { x: 0, y: 0, width: canvas.width, height: canvas.height };
   const availableW = width * (1 - padding * 2);
   const availableH = height * (1 - padding * 2);
   const scale = Math.min(availableW / bounds.width, availableH / bounds.height);
@@ -203,6 +282,9 @@ function updatePreview() {
   previewCtx.drawImage(canvas, bounds.x, bounds.y, bounds.width, bounds.height, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
   $('#padding-value').textContent = `${Math.round(padding * 100)}%`;
   $('#export-meta').textContent = `${width} × ${height} PNG`;
+  $('#subject-stats').textContent = analysis.count
+    ? `偵測到 ${analysis.count} 個主體區塊，目前保留 ${analysis.kept} 個`
+    : '未偵測到透明前景，將使用整張圖';
 }
 
 function syncProcessed() {
@@ -226,7 +308,7 @@ canvas.addEventListener('pointerup', () => { if (!state.drawing) return; state.d
 $('#undo').addEventListener('click', async () => { if (state.history.length < 2) return; state.history.pop(); await setCanvasImage(state.history[state.history.length - 1], false); syncProcessed(); $('#undo').disabled = state.history.length < 2; });
 $('#restore').addEventListener('click', async () => { const asset = activeAsset(); if (!asset) return; asset.processed = null; state.history = []; await setCanvasImage(asset.original); renderAssets(); toast('已回到原圖'); });
 $('#presets').addEventListener('click', (event) => { const button = event.target.closest('button[data-w]'); if (!button) return; $('#output-width').value = button.dataset.w; $('#output-height').value = button.dataset.h; updatePreview(); });
-['#output-width', '#output-height', '#padding'].forEach((selector) => $(selector).addEventListener('input', updatePreview));
+['#output-width', '#output-height', '#padding', '#subject-mode'].forEach((selector) => $(selector).addEventListener('input', updatePreview));
 $('#center-subject').addEventListener('click', () => { updatePreview(); toast('已依透明邊界置中主體'); });
 $('#download').addEventListener('click', () => { const asset = activeAsset(); if (!asset) return; updatePreview(); const link = document.createElement('a'); const stem = asset.name.replace(/\.[^.]+$/, ''); link.download = `${stem}-cutout-${preview.width}x${preview.height}.png`; link.href = preview.toDataURL('image/png'); link.click(); });
 

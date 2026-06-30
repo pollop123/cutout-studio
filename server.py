@@ -8,6 +8,9 @@ import base64
 import io
 import json
 import mimetypes
+import re
+import zipfile
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -18,6 +21,10 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent
 MAX_BODY = 30 * 1024 * 1024
 _session = None
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+PRESETS = {
+    "line-icons": [(120, 120), (116, 116), (240, 240), (247, 247), (128, 150), (80, 56)],
+}
 
 
 def rembg_status() -> tuple[bool, str]:
@@ -52,6 +59,146 @@ def remove_background(data: bytes) -> bytes:
         encoded = io.BytesIO()
         output.save(encoded, "PNG", optimize=True)
         return encoded.getvalue()
+
+
+def parse_size(value: str) -> tuple[int, int]:
+    match = re.fullmatch(r"(\d{2,4})x(\d{2,4})", value.lower())
+    if not match:
+        raise argparse.ArgumentTypeError("Use WIDTHxHEIGHT, for example 240x240")
+    width, height = int(match.group(1)), int(match.group(2))
+    if width < 16 or height < 16 or width > 4096 or height > 4096:
+        raise argparse.ArgumentTypeError("Size must be between 16 and 4096 pixels")
+    return width, height
+
+
+def alpha_components(image: Image.Image, alpha_threshold: int = 10) -> list[dict]:
+    image = image.convert("RGBA")
+    width, height = image.size
+    alpha = image.getchannel("A").tobytes()
+    total = width * height
+    visited = bytearray(total)
+    min_area = max(20, round(total * 0.00035))
+    components = []
+
+    for start in range(total):
+        if visited[start] or alpha[start] <= alpha_threshold:
+            continue
+        queue = deque([start])
+        visited[start] = 1
+        min_x, min_y, max_x, max_y = width, height, -1, -1
+        area = 0
+        sum_x = 0
+        sum_y = 0
+        while queue:
+            index = queue.pop()
+            x = index % width
+            y = index // width
+            area += 1
+            sum_x += x
+            sum_y += y
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+            for next_index in (index - 1, index + 1, index - width, index + width):
+                if next_index < 0 or next_index >= total or visited[next_index]:
+                    continue
+                if (next_index == index - 1 and x == 0) or (next_index == index + 1 and x == width - 1):
+                    continue
+                if alpha[next_index] <= alpha_threshold:
+                    continue
+                visited[next_index] = 1
+                queue.append(next_index)
+        if area >= min_area:
+            components.append({
+                "x": min_x,
+                "y": min_y,
+                "width": max_x - min_x + 1,
+                "height": max_y - min_y + 1,
+                "area": area,
+                "cx": sum_x / area,
+                "cy": sum_y / area,
+            })
+    return sorted(components, key=lambda item: item["area"], reverse=True)
+
+
+def select_subject_bounds(image: Image.Image, mode: str) -> tuple[int, int, int, int] | None:
+    components = alpha_components(image)
+    if not components:
+        return None
+    selected = components
+    if mode == "largest":
+        selected = components[:1]
+    elif mode == "top2":
+        selected = components[:2]
+    elif mode == "center":
+        center_x, center_y = image.width / 2, image.height / 2
+        selected = [min(components, key=lambda item: ((item["cx"] - center_x) ** 2 + (item["cy"] - center_y) ** 2) ** 0.5)]
+    min_x = min(item["x"] for item in selected)
+    min_y = min(item["y"] for item in selected)
+    max_x = max(item["x"] + item["width"] for item in selected)
+    max_y = max(item["y"] + item["height"] for item in selected)
+    return min_x, min_y, max_x, max_y
+
+
+def render_cutout(image: Image.Image, size: tuple[int, int], padding_percent: int, subject_mode: str) -> Image.Image:
+    image = image.convert("RGBA")
+    bounds = select_subject_bounds(image, subject_mode) or (0, 0, image.width, image.height)
+    crop = image.crop(bounds)
+    output_width, output_height = size
+    padding = max(0, min(35, padding_percent)) / 100
+    available_width = output_width * (1 - padding * 2)
+    available_height = output_height * (1 - padding * 2)
+    scale = min(available_width / crop.width, available_height / crop.height)
+    draw_width = max(1, round(crop.width * scale))
+    draw_height = max(1, round(crop.height * scale))
+    resized = crop.resize((draw_width, draw_height), Image.Resampling.LANCZOS)
+    output = Image.new("RGBA", size, (0, 0, 0, 0))
+    output.alpha_composite(resized, ((output_width - draw_width) // 2, (output_height - draw_height) // 2))
+    return output
+
+
+def slugify_stem(path: Path) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem).strip("-")
+    return stem or "image"
+
+
+def run_batch(args: argparse.Namespace) -> None:
+    input_dir = args.input.resolve()
+    output_dir = args.output.resolve()
+    if not input_dir.is_dir():
+        raise SystemExit(f"Input folder not found: {input_dir}")
+    sizes = PRESETS[args.preset] if args.preset else args.size
+    output_dir.mkdir(parents=True, exist_ok=True)
+    images = sorted(path for path in input_dir.iterdir() if path.suffix.lower() in IMAGE_EXTENSIONS)
+    if not images:
+        raise SystemExit("No JPG, PNG, or WebP images found")
+
+    exported = []
+    for image_path in images:
+        with Image.open(image_path) as image:
+            image = image.convert("RGBA")
+            if image.width * image.height > 25_000_000:
+                print(f"skip {image_path.name}: larger than 25 megapixels")
+                continue
+            if not args.skip_remove:
+                source = io.BytesIO()
+                image.save(source, "PNG")
+                image = Image.open(io.BytesIO(remove_background(source.getvalue()))).convert("RGBA")
+            for size in sizes:
+                result = render_cutout(image, size, args.padding, args.subject_mode)
+                output_name = f"{slugify_stem(image_path)}-{size[0]}x{size[1]}.png"
+                output_path = output_dir / output_name
+                result.save(output_path, "PNG", optimize=True)
+                exported.append(output_path)
+                print(f"wrote {output_path}")
+
+    if args.zip:
+        zip_path = args.zip.resolve()
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in exported:
+                archive.write(path, path.relative_to(output_dir.parent))
+        print(f"wrote {zip_path}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,10 +263,28 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=4173)
+    subparsers = parser.add_subparsers(dest="command")
+    serve_parser = subparsers.add_parser("serve", help="start the local web UI")
+    serve_parser.add_argument("--port", type=int, default=4173)
+    batch_parser = subparsers.add_parser("batch", help="process a folder into transparent PNG outputs")
+    batch_parser.add_argument("input", type=Path)
+    batch_parser.add_argument("--output", type=Path, default=ROOT / "outputs")
+    batch_parser.add_argument("--preset", choices=sorted(PRESETS), default="line-icons")
+    batch_parser.add_argument("--size", type=parse_size, action="append", help="custom output size, for example 240x240")
+    batch_parser.add_argument("--padding", type=int, default=12)
+    batch_parser.add_argument("--subject-mode", choices=["all", "largest", "top2", "center"], default="all")
+    batch_parser.add_argument("--skip-remove", action="store_true", help="skip AI background removal and use existing alpha")
+    batch_parser.add_argument("--zip", type=Path, help="write a ZIP containing all exported PNG files")
+    parser.add_argument("--port", type=int, default=4173, help=argparse.SUPPRESS)
     args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Creator Cutout Studio: http://127.0.0.1:{args.port}")
+    if args.command == "batch":
+        if args.size:
+            args.preset = None
+        run_batch(args)
+        return
+    port = getattr(args, "port", 4173)
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print(f"Creator Cutout Studio: http://127.0.0.1:{port}")
     server.serve_forever()
 
 
