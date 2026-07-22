@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cutout Studio — 創作者去背整理工具</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LOCAL CREATOR TOOL</p>
+      <h1>Cutout Studio</h1>
+      <p class="subtitle">批次匯入、自動去背、置中與輸出社群素材。</p>
+    </div>
+    <div class="model-status" id="model-status"><span></span>正在檢查去背模型</div>
+  </header>
+
+  <main class="workspace">
+    <aside class="library panel">
+      <div class="panel-title">
+        <div><p class="step">01</p><h2>素材庫</h2></div>
+        <button class="ghost" id="clear-all" type="button">清空</button>
+      </div>
+      <label class="dropzone" id="dropzone">
+        <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+        <strong>把照片拖到這裡</strong>
+        <span>或點擊選擇 JPG、PNG、WebP</span>
+      </label>
+      <div class="asset-list" id="asset-list">
+        <div class="empty-state">尚未匯入素材</div>
+      </div>
+    </aside>
+
+    <section class="editor panel">
+      <div class="panel-title">
+        <div><p class="step">02</p><h2>去背與修整</h2></div>
+        <span class="file-label" id="active-name">未選擇圖片</span>
+      </div>
+      <div class="canvas-shell" id="canvas-shell">
+        <canvas id="editor-canvas" width="900" height="700"></canvas>
+        <div class="canvas-empty" id="canvas-empty">從左側選擇一張素材</div>
+      </div>
+      <div class="toolbar">
+        <button class="primary" id="auto-remove" type="button" disabled>自動去背</button>
+        <button id="cleanup-mask" type="button" disabled>自動清理遮罩</button>
+        <button id="eraser-toggle" type="button" disabled>橡皮擦：關</button>
+        <label>筆刷 <input id="brush-size" type="range" min="6" max="120" value="36"></label>
+        <button id="undo" type="button" disabled>復原上一步</button>
+        <button id="redo" type="button" disabled>重做</button>
+        <button id="restore" type="button" disabled>回到原圖</button>
+      </div>
+    </section>
+
+    <aside class="export panel">
+      <div class="panel-title"><div><p class="step">03</p><h2>置中與輸出</h2></div></div>
+      <div class="presets" id="presets">
+        <button data-w="120" data-h="120">LINE 120</button>
+        <button data-w="116" data-h="116">LINE 116</button>
+        <button data-w="240" data-h="240">LINE 240</button>
+        <button data-w="247" data-h="247">LINE 247</button>
+        <button data-w="128" data-h="150">Menu</button>
+        <button data-w="80" data-h="56">iOS 26</button>
+      </div>
+      <div class="field-row">
+        <label>寬 <input id="output-width" type="number" min="16" max="4096" value="240"></label>
+        <label>高 <input id="output-height" type="number" min="16" max="4096" value="240"></label>
+      </div>
+      <label class="range-field">安全留白 <output id="padding-value">12%</output>
+        <input id="padding" type="range" min="0" max="35" value="12">
+      </label>
+      <label class="select-field">主體策略
+        <select id="subject-mode">
+          <option value="all">全部保留</option>
+          <option value="largest">只保留最大主體</option>
+          <option value="top2">保留前 2 個主體</option>
+          <option value="center">保留最靠中心主體</option>
+        </select>
+      </label>
+      <label class="select-field">遮罩清理
+        <select id="cleanup-preset">
+          <option value="photo">照片自然</option>
+          <option value="drawing">手繪乾淨</option>
+          <option value="cartoon">卡通截圖</option>
+          <option value="off">不清理</option>
+        </select>
+      </label>
+      <label class="range-field">清理強度 <output id="cleanup-value">50%</output>
+        <input id="cleanup-strength" type="range" min="0" max="100" value="50">
+      </label>
+      <p class="subject-stats" id="subject-stats">尚未分析主體</p>
+      <button id="center-subject" type="button" disabled>主體自動置中</button>
+      <div class="preview-card">
+        <canvas id="export-preview" width="240" height="240"></canvas>
+        <p id="export-meta">240 × 240 PNG</p>
+      </div>
+      <button class="download" id="download" type="button" disabled>下載透明 PNG</button>
+      <p class="privacy">素材只在你的電腦與本機服務間處理，不會上傳到第三方。</p>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

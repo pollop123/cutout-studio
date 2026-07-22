@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LINE 貼圖與表情貼工作區</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="packs.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body class="pack-page">
+  <header class="app-header pack-header">
+    <div class="header-logo">
+      <span class="logo-icon">✦</span>
+      <div class="logo-text"><h1>LINE 創作工作區</h1><span class="version">v5.0 · 匯入、快取與自動復原</span></div>
+    </div>
+    <nav class="product-switcher" aria-label="專案類型">
+      <a href="/">主題</a>
+      <a id="mode-sticker" href="?mode=sticker">靜態貼圖</a>
+      <a id="mode-emoji" href="?mode=emoji">表情貼</a>
+    </nav>
+    <div class="pack-actions">
+      <span class="autosave-status" id="autosave-status">尚未儲存</span>
+      <button class="btn btn-secondary" id="save-pack-project">儲存專案</button>
+      <button class="btn btn-secondary" id="load-pack-project">載入專案</button>
+      <input id="pack-project-file" type="file" accept="application/json,.json" hidden>
+      <button class="btn btn-primary" id="generate-pack" disabled>驗證並產生 ZIP</button>
+    </div>
+  </header>
+
+  <main class="pack-workspace">
+    <aside class="pack-panel pack-library">
+      <div class="pack-panel-title"><div><h2>素材庫</h2><p id="engine-status">正在檢查圖像引擎…</p></div><span id="source-count" class="badge">0</span></div>
+      <label class="pack-dropzone" id="pack-dropzone">
+        <input id="pack-file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <strong>拖放照片到這裡</strong>
+        <span>或點擊選擇多張圖片</span>
+      </label>
+      <div class="import-actions">
+        <button class="btn btn-secondary" id="choose-files" type="button">選擇圖片</button>
+        <button class="btn btn-secondary" id="choose-folder" type="button">選擇資料夾</button>
+        <input id="pack-folder-input" type="file" accept="image/png,image/jpeg,image/webp" webkitdirectory directory multiple hidden>
+      </div>
+      <p class="import-status" id="import-status"></p>
+      <div id="pack-source-list" class="pack-source-list"></div>
+    </aside>
+
+    <section class="pack-panel pack-builder">
+      <div class="pack-toolbar">
+        <div>
+          <h2 id="pack-title">靜態貼圖組</h2>
+          <p id="pack-guideline"></p>
+        </div>
+        <label>張數
+          <select id="pack-count"></select>
+        </label>
+        <label class="pack-toolbar-check" id="auto-caption-field"><input id="auto-caption" type="checkbox" checked> 自動實用文字</label>
+        <label>去背模式
+          <select id="cutout-mode"><option value="draft">快速草稿</option><option value="quality">高品質</option></select>
+        </label>
+        <button class="btn btn-secondary" id="smart-fill">智慧填入</button>
+        <button class="btn btn-primary" id="batch-cutout" disabled>批次 AI 去背</button>
+        <button class="btn btn-primary" id="auto-build" disabled>一鍵建立初稿</button>
+      </div>
+      <div class="pack-progress"><span id="pack-progress-text">0 / 8</span><div><i id="pack-progress-bar"></i></div></div>
+      <div class="batch-progress" id="batch-progress" hidden>
+        <span id="batch-status-text">準備中…</span><div><i id="batch-progress-bar"></i></div><button id="cancel-batch" type="button">取消</button>
+      </div>
+      <div id="pack-slots" class="pack-slots"></div>
+    </section>
+
+    <aside class="pack-panel pack-inspector">
+      <div class="pack-panel-title"><div><h2>小尺寸預覽</h2><p id="preview-note">請選擇一個格位</p></div></div>
+      <div class="checker preview-shell"><canvas id="pack-preview" width="370" height="320"></canvas></div>
+      <p class="crop-help">直接拖曳主體平移，滾輪或雙指縮放</p>
+      <label class="pack-field">文字（選填）<input id="item-caption" maxlength="20" placeholder="例如：謝謝、收到！"></label>
+      <label class="pack-field" id="caption-layout-field">文字排版
+        <select id="caption-layout"><option value="auto">自動避讓</option><option value="bottom">底部中央</option><option value="left">左下</option><option value="right">右下</option></select>
+      </label>
+      <label class="pack-field">主體類型
+        <select id="subject-type"><option value="auto">自動判斷</option><option value="person">人物</option><option value="pet">寵物／物件</option></select>
+      </label>
+      <section class="face-picker" id="face-picker" hidden>
+        <div><strong>合照人物</strong><button type="button" id="select-all-faces">保留全部</button></div>
+        <p>選擇要保留的人物；完成 AI 去背後，未選人物會從遮罩中移除。</p>
+        <div class="face-options" id="face-options"></div>
+      </section>
+      <div class="pack-field-row">
+        <label>文字色 <input id="caption-color" type="color" value="#111111"></label>
+        <label>描邊色 <input id="outline-color" type="color" value="#ffffff"></label>
+      </div>
+      <label class="pack-field">字體大小 <input id="caption-size" type="range" min="18" max="72" value="42"><output id="caption-size-value">42</output></label>
+      <div class="pack-option-row">
+        <label><input id="focus-face" type="checkbox" checked> 臉部特寫構圖</label>
+        <label><input id="subject-outline" type="checkbox" checked> 人物描邊</label>
+      </div>
+      <label class="pack-field">人物描邊寬度 <input id="subject-outline-width" type="range" min="0" max="14" value="8"><output id="subject-outline-width-value">8</output></label>
+      <label class="pack-field">構圖縮放 <input id="item-zoom" type="range" min="50" max="300" value="94"><output id="item-zoom-value">94%</output></label>
+      <button class="btn btn-secondary crop-reset" id="reset-crop" type="button">重設 AI 構圖</button>
+      <div id="quality-hints" class="quality-hints"></div>
+      <div class="mini-chat">
+        <p>縮小後辨識度</p>
+        <div class="mini-row light"><span>淺色背景</span><img id="mini-preview-light" alt=""></div>
+        <div class="mini-row dark"><span>深色背景</span><img id="mini-preview-dark" alt=""></div>
+      </div>
+      <div id="pack-validation" class="pack-validation" hidden></div>
+    </aside>
+  </main>
+  <div id="pack-toast" class="toast" role="status"></div>
+  <script src="packs.js"></script>
+</body>
+</html>

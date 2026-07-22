@@ -1,16 +1,47 @@
-# Local Python environment
-/venv/
-.venv/
+# Personal source photos and identity-derived assets
+/100*_0.jpg
+/generated_assets/
+
+# Generated LINE theme outputs
+/line_theme/
+/line_theme.zip
+/line_stickers/
+/line_stickers.zip
+/line_emoji/
+/line_emoji.zip
+/line_theme_interactive.zip
+/audit-output/
+/test_thumb.png
+
+# Creator tool runtime data
+/creator_tool/venv/
+/creator_tool/workspace/
+/creator_tool/uploads/
+/creator_tool/outputs/
+/creator_tool/.cache/
+/.workspace/
+/.cache/
+
+# Python
 __pycache__/
 *.py[cod]
+*.pyd
+.Python
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+.coverage
+htmlcov/
 
-# Runtime data and generated files
-/workspace/
-/uploads/
-/outputs/
-/.cache/
-*.log
-*.tmp
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Secrets and local configuration
 .env
@@ -19,8 +50,18 @@ __pycache__/
 *.pem
 *.key
 
-# Editors and operating systems
+# Temporary files and logs
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+/tmp/
+
+# macOS / editors
 .DS_Store
 ._*
 .idea/
 .vscode/
+.claude/
