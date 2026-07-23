@@ -9,7 +9,11 @@
 三種模式共用 `rembg/isnet-general-use` Alpha 去背（含 alpha matting 邊緣細化，模型無法載入時退回 `u2netp`）、YuNet 人臉位置偵測（含眼睛關鍵點，模型缺失時退回 Haar cascade）、無人臉時的主體偵測（Alpha 剪影優先，否則用頻譜殘差顯著性）、專案 JSON 與後端 ZIP 驗證。
 人臉功能只用於裁切與排序，不辨識身分。眼睛關鍵點只在當次請求中用來對齊裁切位置。當次分析會產生不具名的視覺相似指紋，只用來避免連續挑到近似構圖，不會寫入磁碟或作身分辨識。
 
-YuNet 模型檔位於 `creator_tool/models/face_detection_yunet_2023mar.onnx`；rembg 模型第一次使用時會自動下載到 `~/.u2net/`。
+YuNet 模型檔位於 `creator_tool/models/face_detection_yunet_2023mar.onnx`，來源為
+[OpenCV Zoo 的 YuNet 人臉偵測模型](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)，
+並依該模型的 MIT License 散布；授權文字保存在
+`creator_tool/models/YUNET_LICENSE`。rembg 模型第一次使用時會自動下載到
+`~/.u2net/`。
 
 ## 啟動
 
