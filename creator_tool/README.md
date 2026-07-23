@@ -104,15 +104,10 @@ venv/bin/python server.py batch ./photos --output ./outputs --subject-mode top2 
 - 需要精準逐人辨識的多人照片
 - 高度依賴商業 IP 授權的素材流程
 
-## Roadmap
-
-- 批次去背佇列
-- 命名規則與 ZIP 匯出模板
-- 專案儲存與載入
-- 手動框選主體範圍
-- 臉部模式
-- LINE 主題規格驗證
-
 ## License
 
-MIT
+本工具程式依根目錄的 MIT License 授權。
+
+內附的 `models/face_detection_yunet_2023mar.onnx` 來自
+[OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)，
+並依 `models/YUNET_LICENSE` 中的 MIT License 散布。
